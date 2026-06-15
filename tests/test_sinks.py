@@ -88,7 +88,31 @@ def test_github_sink_issue_body_first_vs_followup_differs():
 def test_github_sink_fingerprint_label_format():
     sink = GitHubIssueSink(repo="owner/repo", token="tok")
     label = sink._fingerprint_label(_result(check_name="url_allowlist", fingerprint="deadbeef"))
-    assert label == "governance:url_allowlist:deadbeef"
+    assert label == "gov:deadbeef"
+
+
+def test_github_sink_fingerprint_label_under_50_chars_for_long_check_name():
+    """GitHub label names hard-cap at 50 chars. The fingerprint label must
+    fit regardless of how long the check name is (audit.* rules in
+    particular get long)."""
+    sink = GitHubIssueSink(repo="owner/repo", token="tok")
+    long_name = "audit.prompt_lacks_refusal_language_extra"
+    label = sink._fingerprint_label(
+        _result(check_name=long_name, fingerprint="abcdef012345")
+    )
+    assert len(label) <= 50
+    # Fingerprint is what dedup depends on — that piece must survive intact.
+    assert "abcdef012345" in label
+
+
+def test_github_sink_category_label_truncated_when_check_name_too_long():
+    sink = GitHubIssueSink(repo="owner/repo", token="tok")
+    # 60-char check name → "governance:" + 60 = 71 chars unguarded.
+    long_name = "x" * 60
+    labels = sink._category_labels(_result(check_name=long_name))
+    assert "governance" in labels
+    for label in labels:
+        assert len(label) <= 50
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +124,7 @@ def test_github_sink_fingerprint_label_format():
 async def test_github_sink_creates_issue_when_none_exists(httpx_mock):
     httpx_mock.add_response(
         method="GET",
-        url="https://api.github.com/repos/owner/repo/issues?labels=governance%3Adisclaimer%3Aabc123&state=open&per_page=1",
+        url="https://api.github.com/repos/owner/repo/issues?labels=gov%3Aabc123&state=open&per_page=1",
         json=[],
     )
     httpx_mock.add_response(
@@ -115,7 +139,9 @@ async def test_github_sink_creates_issue_when_none_exists(httpx_mock):
     create_req = [r for r in httpx_mock.get_requests() if r.method == "POST"][0]
     body = create_req.read().decode()
     assert "trace-xyz" in body
-    assert "governance:disclaimer:abc123" in body
+    # New (v0.2.1) label scheme: short dedup label + per-check category label.
+    assert "gov:abc123" in body
+    assert "governance:disclaimer" in body
     assert "[governance] disclaimer" in body
 
 
@@ -123,7 +149,7 @@ async def test_github_sink_creates_issue_when_none_exists(httpx_mock):
 async def test_github_sink_comments_on_existing_issue(httpx_mock):
     httpx_mock.add_response(
         method="GET",
-        url="https://api.github.com/repos/owner/repo/issues?labels=governance%3Adisclaimer%3Aabc123&state=open&per_page=1",
+        url="https://api.github.com/repos/owner/repo/issues?labels=gov%3Aabc123&state=open&per_page=1",
         json=[{"number": 99}],
     )
     httpx_mock.add_response(

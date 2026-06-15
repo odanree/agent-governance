@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-15
+
+### Fixed
+- `GitHubIssueSink` produced labels over GitHub's 50-char hard limit when the check name was long (audit.* rules in particular). The API rejected every `POST /issues` with `422 Unprocessable Entity` and the sink quietly logged the error — meaning **no incidents from runtime checks or audit findings with long check names ever made it to the tracker**. The fingerprint dedup label is now `gov:<fp>` (always 16 chars); the per-check categorization label is `governance:<check_name>`, truncated to 50 chars on the rare overflow. Two new tests assert both labels stay under the cap regardless of check-name length.
+
 ## [0.2.0] — 2026-06-15
 
 ### Added
@@ -35,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - v0.x API is provisional. Breaking changes will land in minor bumps with notes here.
 
-[Unreleased]: https://github.com/odanree/agent-governance/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/odanree/agent-governance/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/odanree/agent-governance/releases/tag/v0.2.1
 [0.2.0]: https://github.com/odanree/agent-governance/releases/tag/v0.2.0
 [0.1.0]: https://github.com/odanree/agent-governance/releases/tag/v0.1.0
