@@ -97,8 +97,24 @@ class GitHubIssueSink:
             # Sink failures MUST NEVER block the request — log and move on.
             log.exception("GitHubIssueSink failed: %s", e)
 
+    # GitHub's hard limit on label names is 50 chars. The fingerprint label
+    # has to be both stable (so dedup works) and under the cap; the check_name
+    # can be long (especially for audit.* rules), so we keep only the
+    # fingerprint in the dedup label. `governance:<check_name>` lives as a
+    # separate categorization label, truncated if it would exceed the cap.
+    _LABEL_MAX = 50
+
     def _fingerprint_label(self, result: CheckResult) -> str:
-        return f"governance:{result.check_name}:{result.fingerprint}"
+        return f"gov:{result.fingerprint}"
+
+    def _category_labels(self, result: CheckResult) -> list[str]:
+        check_label = f"governance:{result.check_name}"
+        if len(check_label) > self._LABEL_MAX:
+            # Truncate from the right; the fingerprint label still uniquely
+            # identifies the specific finding, so losing a few tail chars here
+            # only affects readability of the category facet.
+            check_label = check_label[: self._LABEL_MAX]
+        return ["governance", check_label]
 
     async def _find_open_issue(self, client: httpx.AsyncClient, label: str) -> int | None:
         r = await client.get(
@@ -118,12 +134,7 @@ class GitHubIssueSink:
     ) -> None:
         title = f"[governance] {result.check_name}: {result.detail[:120]}"
         body = self._issue_body(result, trace_id, first=True)
-        labels = [
-            "governance",
-            f"governance:{result.check_name}",
-            label,
-            *self.extra_labels,
-        ]
+        labels = [*self._category_labels(result), label, *self.extra_labels]
         r = await client.post(
             f"/repos/{self.repo}/issues",
             json={"title": title, "body": body, "labels": labels},
