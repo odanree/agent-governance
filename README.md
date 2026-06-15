@@ -1,8 +1,11 @@
 # agent-governance
 
-A small, framework-agnostic governance layer for LLM agents: **runs policy checks on each model output, mutates the answer when needed, and reports incidents to a configurable sink** — including auto-filed GitHub issues, deduplicated by fingerprint.
+Governance toolkit for LLM agents. Two faces, one package:
 
-Drop into a LangGraph node, a LangChain Runnable, a FastAPI dependency, or call it as a plain async function. The package never imports any LLM SDK or observability vendor.
+1. **Runtime checks** you wire into an agent — disclaimer enforcement, URL allowlists, prompt-injection observability — with policy violations auto-filed as deduplicated GitHub issues.
+2. **A `audit` CLI** you run against any Python LLM agent repo — walks the code, finds governance gaps (no evals, no tracing, no disclaimer enforcement, hardcoded keys, prompts without refusal language), and recommends the runtime checks above to close them.
+
+Drop the runtime into a LangGraph node, a LangChain Runnable, a FastAPI dependency, or call it as a plain async function. The package never imports any LLM SDK or observability vendor.
 
 ```
                          ┌─────────────────────┐
@@ -23,13 +26,80 @@ state ─────────────────► │                
 ## Install
 
 ```bash
-pip install git+https://github.com/odanree/agent-governance.git@main
-# or pin to a tag: ...@v0.1.0
+pip install git+https://github.com/odanree/agent-governance.git@v0.2.0
 ```
 
-Requires Python 3.11+.
+Requires Python 3.11+. Installs both the runtime library and the `agent-governance` CLI.
 
-## Quick start (LangGraph)
+---
+
+## Audit any LLM repo
+
+```bash
+agent-governance audit ./path/to/repo            # human-readable Markdown
+agent-governance audit . --format json           # for CI / dashboards
+agent-governance audit . --fail-on warning       # exit nonzero on warnings
+agent-governance audit . --github owner/repo     # file findings as GitHub issues
+```
+
+The CLI walks the repo (skipping `.venv`, `node_modules`, etc.), builds an inventory of LLM call sites, prompts, evals, tracing, and config, then runs **9 rules** that look for governance gaps and recommend the runtime checks below to close them.
+
+Two real-world demo runs are committed at:
+
+- [`docs/demo/audit-oc-realestate-intel.md`](docs/demo/audit-oc-realestate-intel.md) — a well-governed LangGraph agent: 1 finding (a long prompt without refusal language)
+- [`docs/demo/audit-clinical-mcp-server.md`](docs/demo/audit-clinical-mcp-server.md) — an MCP tool server: 1 finding (URL response field with no allowlist enforcement)
+
+Both findings were actually unaddressed in the target repos when the audit was run — the CLI surfaces real issues, not noise.
+
+### Rules shipped in v0.2
+
+| Rule | Severity | What it catches |
+|---|---|---|
+| `LLM_CALL_NO_EVAL` | warning | LLM calls present but no `evals/`, golden file, or eval framework imported |
+| `LLM_CALL_NO_TRACE` | warning | LLM calls but no Langfuse / LangSmith / OpenTelemetry / Phoenix / Helicone import |
+| `MISSING_ENV_EXAMPLE` | info | No `.env.example` committed — new contributors have to grep `config.py` |
+| `HARDCODED_API_KEY` | violation | Regex hits on Anthropic / OpenAI / GitHub / AWS key patterns in source |
+| `MISSING_GOVERNANCE_NODE` | warning | LLM calls present but `agent_governance.build_governance_node` is not imported anywhere |
+| `MISSING_PROVENANCE_DISCLAIMER` | warning | Prompt mentions synthetic / illustrative / non-authoritative data but no DisclaimerCheck is wired |
+| `MISSING_URL_OUTPUT_VALIDATION` | warning | A Pydantic response model has a `url` field but no `URLAllowlistCheck` import |
+| `PROMPT_LACKS_REFUSAL_LANGUAGE` | info | A long prompt (≥ 300 chars) contains no "do not" / "never" / "must not" / "refuse" tokens |
+| `MISSING_TRACE_ID_IN_RESPONSE` | info | Tracing is wired but no API response model exposes a `trace_id` field |
+
+Each finding carries a `recommendation` pointing at the runtime check (or small ADR-worthy decision) that closes the gap.
+
+### CI integration
+
+```yaml
+# .github/workflows/governance.yml
+- name: Governance audit
+  run: |
+    pip install git+https://github.com/odanree/agent-governance.git@v0.2.0
+    agent-governance audit . --fail-on warning
+```
+
+Add `--github $GITHUB_REPOSITORY` to also file each finding as a deduplicated issue.
+
+### Programmatic API
+
+```python
+from agent_governance.audit import scan, run_rules, format_markdown
+
+inv = scan("./my-repo")
+findings = run_rules(inv)
+print(format_markdown(inv, findings))
+```
+
+Add custom rules by implementing the `Rule` Protocol and passing your list to `run_rules(inv, my_rules)`.
+
+See [ADR-0002](docs/adr/0002-audit-cli.md) for the audit design.
+
+---
+
+## Runtime governance node
+
+For wiring policy enforcement into your agent at request time. This is what the audit recommends installing.
+
+### Quick start (LangGraph)
 
 ```python
 from agent_governance import (
