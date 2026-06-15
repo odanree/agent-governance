@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-governance"
-version = "0.1.0"
+version = "0.2.0"
 description = "Policy-enforcement node + incident reporting for LLM agents. Drop-in for LangGraph; framework-agnostic otherwise."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,9 @@ dev = [
 Homepage = "https://github.com/odanree/agent-governance"
 Repository = "https://github.com/odanree/agent-governance"
 Issues = "https://github.com/odanree/agent-governance/issues"
+
+[project.scripts]
+agent-governance = "agent_governance.audit.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_governance"]
